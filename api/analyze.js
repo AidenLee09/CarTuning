@@ -1,13 +1,13 @@
 const system_instruction = `You are a Senior Race Engineer for Hyundai N and Corvette platforms. Analyze CSV telemetry like a calibration lead: focus on boost control, intake air temperature, ignition timing, AFR stability, repeatability, and parts that should be changed before adding power. Be precise, practical, and avoid generic tuning advice.`;
 
-const VERTEX_TIMEOUT_MS = 25_000;
+const GEMINI_TIMEOUT_MS = 25_000;
 
-function getVertexEndpoint() {
-  if (!process.env.VERTEX_PROJECT_ID || !process.env.VERTEX_API_KEY) {
+function getGenerativeLanguageEndpoint() {
+  if (!process.env.VERTEX_API_KEY) {
     return null;
   }
 
-  return `https://us-central1-aiplatform.googleapis.com/v1beta1/projects/${process.env.VERTEX_PROJECT_ID}/locations/us-central1/publishers/google/models/gemini-3-flash-preview:generateContent?key=${process.env.VERTEX_API_KEY}`;
+  return `https://generativelanguage.googleapis.com/v1beta1/models/gemini-3-flash-preview:generateContent?key=${process.env.VERTEX_API_KEY}`;
 }
 
 function buildPrompt({ fileName, rowCount, summary, sampleRows, missingColumns, roadmap }) {
@@ -37,6 +37,12 @@ Return Markdown with these sections:
 4. Parts Roadmap
 5. Trackside Checklist
 `;
+}
+
+function buildGeminiPrompt(telemetry) {
+  return `${system_instruction}
+
+${buildPrompt(telemetry)}`;
 }
 
 function buildLocalReport({ summary, sampleRows, missingColumns, roadmap }) {
@@ -126,13 +132,13 @@ function validateTelemetryPayload(telemetry) {
 }
 
 async function callGemini(telemetry) {
-  const endpoint = getVertexEndpoint();
+  const endpoint = getGenerativeLanguageEndpoint();
 
   if (!endpoint) {
     return {
       mode: 'local',
       markdown: buildLocalReport(telemetry),
-      warning: 'Vertex AI server environment variables are not configured, so a local demo report was generated.',
+      warning: 'Google AI Studio server environment variables are not configured, so a local demo report was generated.',
     };
   }
 
@@ -140,7 +146,7 @@ async function callGemini(telemetry) {
 
   try {
     const controller = new AbortController();
-    timeoutId = setTimeout(() => controller.abort(), VERTEX_TIMEOUT_MS);
+    timeoutId = setTimeout(() => controller.abort(), GEMINI_TIMEOUT_MS);
 
     const response = await fetch(endpoint, {
       method: 'POST',
@@ -149,26 +155,26 @@ async function callGemini(telemetry) {
       },
       signal: controller.signal,
       body: JSON.stringify({
-        systemInstruction: {
-          parts: [{ text: system_instruction }],
-        },
         contents: [
           {
-            role: 'user',
-            parts: [{ text: buildPrompt(telemetry) }],
+            parts: [{ text: buildGeminiPrompt(telemetry) }],
           },
         ],
-        generationConfig: {
-          temperature: 0.35,
-          maxOutputTokens: 1300,
-        },
       }),
     });
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('Vertex AI error response:', errorText);
-      throw new Error(`Vertex AI request failed (${response.status}): ${errorText}`);
+      let errorMessage = errorText;
+
+      try {
+        errorMessage = JSON.parse(errorText)?.error?.message || errorText;
+      } catch {
+        errorMessage = errorText;
+      }
+
+      console.error('Google AI Studio error.message:', errorMessage);
+      throw new Error(`Google AI Studio request failed (${response.status}): ${errorMessage}`);
     }
 
     const data = await response.json();
@@ -178,16 +184,16 @@ async function callGemini(telemetry) {
       .join('\n\n');
 
     if (!markdown) {
-      throw new Error('Vertex AI returned an empty response.');
+      throw new Error('Google AI Studio returned an empty response.');
     }
 
-    return { mode: 'vertex', markdown };
+    return { mode: 'google-ai-studio', markdown };
   } catch (error) {
     console.error(error);
     return {
       mode: 'fallback',
       markdown: buildLocalReport(telemetry),
-      warning: 'Vertex AI was unreachable from the serverless function, so Apex Agent generated a local report.',
+      warning: 'Google AI Studio was unreachable from the serverless function, so Apex Agent generated a local report.',
     };
   } finally {
     clearTimeout(timeoutId);
