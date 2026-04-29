@@ -7,7 +7,7 @@ function getGenerativeLanguageEndpoint() {
     return null;
   }
 
-  return `https://generativelanguage.googleapis.com/v1beta1/models/gemini-3-flash-preview:generateContent?key=${process.env.VERTEX_API_KEY}`;
+  return 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent';
 }
 
 function buildPrompt({ fileName, rowCount, summary, sampleRows, missingColumns, roadmap }) {
@@ -152,6 +152,7 @@ async function callGemini(telemetry) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'x-goog-api-key': process.env.VERTEX_API_KEY,
       },
       signal: controller.signal,
       body: JSON.stringify({
@@ -174,6 +175,7 @@ async function callGemini(telemetry) {
       }
 
       console.error('Google AI Studio error.message:', errorMessage);
+      console.error('Google AI Studio status:', response.status, response.statusText);
       throw new Error(`Google AI Studio request failed (${response.status}): ${errorMessage}`);
     }
 
@@ -190,10 +192,16 @@ async function callGemini(telemetry) {
     return { mode: 'google-ai-studio', markdown };
   } catch (error) {
     console.error(error);
+
+    const safeErrorMessage =
+      error.name === 'AbortError'
+        ? 'Google AI Studio timed out after 25 seconds.'
+        : error.message || 'Unknown Google AI Studio error.';
+
     return {
       mode: 'fallback',
       markdown: buildLocalReport(telemetry),
-      warning: 'Google AI Studio was unreachable from the serverless function, so Apex Agent generated a local report.',
+      warning: `Google AI Studio request failed: ${safeErrorMessage}`,
     };
   } finally {
     clearTimeout(timeoutId);
