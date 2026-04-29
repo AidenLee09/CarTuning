@@ -8,6 +8,7 @@ export function useTelemetryAnalysis() {
   const [status, setStatus] = useState('idle');
   const [telemetry, setTelemetry] = useState(null);
   const [report, setReport] = useState('');
+  const [analysis, setAnalysis] = useState(null);
   const [notification, setNotification] = useState(null);
 
   const dismissNotification = useCallback(() => {
@@ -37,6 +38,7 @@ export function useTelemetryAnalysis() {
 
       setTelemetry(parsed);
       setReport(analysis.markdown);
+      setAnalysis(analysis.analysis);
       setStatus('complete');
 
       if (parsed.missingColumns.length) {
@@ -60,6 +62,7 @@ export function useTelemetryAnalysis() {
       }
     } catch (error) {
       setStatus('error');
+      setAnalysis(null);
       setNotification({
         tone: 'error',
         title: 'Telemetry parse failed',
@@ -91,6 +94,7 @@ export function useTelemetryAnalysis() {
     status,
     telemetry,
     report,
+    analysis,
     notification,
     analyzeFile,
     loadMockTelemetry,

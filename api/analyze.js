@@ -11,7 +11,66 @@ function getGenerativeLanguageEndpoint() {
   return `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 }
 
-function buildPrompt({ fileName, rowCount, summary, sampleRows, missingColumns, roadmap }) {
+function clampScore(value, fallback = 70) {
+  const number = Number(value);
+
+  if (!Number.isFinite(number)) {
+    return fallback;
+  }
+
+  return Math.max(0, Math.min(100, Math.round(number)));
+}
+
+function cleanString(value, fallback = '') {
+  return typeof value === 'string' && value.trim() ? value.trim() : fallback;
+}
+
+function topItems(items, count) {
+  return Array.isArray(items) ? items.slice(0, count) : [];
+}
+
+function rangeFor(rows, key, unit) {
+  const values = rows
+    .map((row) => ({
+      value: Number(row[key]),
+      rpm: Number(row.rpm),
+    }))
+    .filter((row) => Number.isFinite(row.value));
+
+  if (!values.length) {
+    return { max: 0, min: 0, unit, maxRpm: 0, minRpm: 0 };
+  }
+
+  const maxRow = values.reduce((best, row) => (row.value > best.value ? row : best), values[0]);
+  const minRow = values.reduce((best, row) => (row.value < best.value ? row : best), values[0]);
+  const digits = key === 'afr' ? 2 : 1;
+
+  return {
+    max: Number(maxRow.value.toFixed(digits)),
+    min: Number(minRow.value.toFixed(digits)),
+    unit,
+    maxRpm: Number.isFinite(maxRow.rpm) ? Math.round(maxRow.rpm) : 0,
+    minRpm: Number.isFinite(minRow.rpm) ? Math.round(minRow.rpm) : 0,
+  };
+}
+
+function getSensorPeaks(telemetry) {
+  if (telemetry.sensorPeaks) {
+    return telemetry.sensorPeaks;
+  }
+
+  const rows = Array.isArray(telemetry.rows) && telemetry.rows.length
+    ? telemetry.rows
+    : telemetry.sampleRows;
+
+  return {
+    boost: rangeFor(rows, 'boost', 'psi'),
+    iat: rangeFor(rows, 'iat', 'F'),
+    afr: rangeFor(rows, 'afr', ':1'),
+  };
+}
+
+function buildPrompt({ fileName, rowCount, summary, sampleRows, missingColumns, roadmap, sensorPeaks }) {
   return `
 Analyze this telemetry upload for Apex Agent.
 
@@ -31,19 +90,54 @@ ${JSON.stringify(sampleRows, null, 2)}
 Initial parts roadmap:
 ${JSON.stringify(roadmap, null, 2)}
 
-Return Markdown with these sections:
-1. Race Engineer Verdict
-2. Risks Found
-3. Calibration Notes
-4. Parts Roadmap
-5. Trackside Checklist
+Deterministic sensor peaks calculated by Apex Agent:
+${JSON.stringify(sensorPeaks, null, 2)}
+
+Return ONLY valid JSON. Do not wrap it in Markdown fences.
+
+JSON schema:
+{
+  "health_score": number from 0 to 100,
+  "vitals": {
+    "thermal": number from 0 to 100,
+    "fueling": number from 0 to 100,
+    "ignition": number from 0 to 100
+  },
+  "lead_verdict": "1-2 sentence technical summary",
+  "anomalies": [
+    { "severity": "critical" | "warning", "issue": "specific issue", "fix": "specific fix" }
+  ],
+  "roadmap": [
+    { "priority": 1, "part": "specific part", "impact": "specific impact" }
+  ],
+  "track_prep": [
+    "step 1",
+    "step 2",
+    "step 3",
+    "step 4",
+    "step 5"
+  ],
+  "markdown_report": "Short Markdown report with sections: Race Engineer Verdict, Risks Found, Calibration Notes, Parts Roadmap, Trackside Checklist"
+}
+
+Scoring guidance:
+- Higher scores mean healthier, safer, and more track-ready.
+- Penalize thermal score when IAT is high or rises sharply.
+- Penalize fueling score when AFR is lean under boost or excessively rich.
+- Penalize ignition score when timing is low near peak boost.
+- Keep parts and fixes practical for Hyundai N and Corvette platforms.
 `;
 }
 
 function buildGeminiPrompt(telemetry) {
+  const preparedTelemetry = {
+    ...telemetry,
+    sensorPeaks: getSensorPeaks(telemetry),
+  };
+
   return `${system_instruction}
 
-${buildPrompt(telemetry)}`;
+${buildPrompt(preparedTelemetry)}`;
 }
 
 function buildLocalReport({ summary, sampleRows, missingColumns, roadmap }) {
@@ -87,6 +181,132 @@ ${roadmap.map((item) => `- **${item.part}:** ${item.reason}`).join('\n')}
 - Confirm plug condition and gap before adding boost.
 - Compare commanded vs actual AFR on the next CSV export.
 - Add knock, coolant temp, and throttle angle PIDs if available.`;
+}
+
+function buildLocalAnalysis(telemetry) {
+  const { summary, missingColumns, roadmap } = telemetry;
+  const sensorPeaks = getSensorPeaks(telemetry);
+  const thermalScore = clampScore(100 - Math.max(0, summary.peakIat.value - 95) * 1.4, 76);
+  const fuelingPenalty = Math.abs(summary.averageAfr.value - 11.8) * 13;
+  const fuelingScore = clampScore(94 - fuelingPenalty, 84);
+  const ignitionScore = clampScore(62 + summary.timingAtMaxBoost.value * 4, 78);
+  const healthScore = clampScore((thermalScore * 0.38) + (fuelingScore * 0.3) + (ignitionScore * 0.32), 78);
+  const anomalies = [];
+
+  if (summary.peakIat.value >= 135) {
+    anomalies.push({
+      severity: 'critical',
+      issue: `Peak IAT reached ${summary.peakIat.value}${summary.peakIat.unit}.`,
+      fix: 'Upgrade intercooling and verify duct sealing before raising boost.',
+    });
+  } else if (summary.peakIat.value >= 115) {
+    anomalies.push({
+      severity: 'warning',
+      issue: `IAT climbed to ${summary.peakIat.value}${summary.peakIat.unit}.`,
+      fix: 'Improve charge-air cooling and re-log after heat soak.',
+    });
+  }
+
+  if (summary.timingAtMaxBoost.value <= 6) {
+    anomalies.push({
+      severity: 'warning',
+      issue: `Ignition timing dropped to ${summary.timingAtMaxBoost.value}${summary.timingAtMaxBoost.unit} near peak boost.`,
+      fix: 'Inspect plug gap and add knock retard to the next log.',
+    });
+  }
+
+  if (summary.averageAfr.value > 12.2) {
+    anomalies.push({
+      severity: 'critical',
+      issue: `Average AFR is ${summary.averageAfr.value}${summary.averageAfr.unit} under load.`,
+      fix: 'Verify fuel pressure, injector duty, and commanded lambda before another hard pull.',
+    });
+  }
+
+  if (!anomalies.length) {
+    anomalies.push({
+      severity: 'warning',
+      issue: 'No critical drift detected in the sampled pull.',
+      fix: 'Add knock, coolant, throttle angle, and fuel pressure PIDs for the next validation run.',
+    });
+  }
+
+  return {
+    health_score: healthScore,
+    vitals: {
+      thermal: thermalScore,
+      fueling: fuelingScore,
+      ignition: ignitionScore,
+    },
+    lead_verdict:
+      healthScore >= 82
+        ? 'The pull is generally stable, with the next gains coming from repeatability and better validation channels.'
+        : 'The pull needs attention before repeated track use, with thermal load and ignition margin leading the risk profile.',
+    sensor_peaks: sensorPeaks,
+    anomalies: anomalies.slice(0, 4),
+    roadmap: roadmap.map((item, index) => ({
+      priority: index + 1,
+      part: item.part,
+      impact: item.reason,
+    })),
+    track_prep: [
+      'Re-log a third-gear pull after full heat soak.',
+      'Inspect spark plug condition and gap.',
+      'Verify AFR against commanded lambda under sustained load.',
+      'Check charge-pipe clamps and intercooler couplers.',
+      missingColumns.length
+        ? `Add missing PIDs: ${missingColumns.join(', ')}.`
+        : 'Add knock retard, coolant temp, throttle angle, and fuel pressure PIDs.',
+    ],
+    markdown_report: buildLocalReport(telemetry),
+  };
+}
+
+function extractJson(text) {
+  const trimmed = cleanString(text);
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const candidate = fenced?.[1] ?? trimmed;
+  const firstBrace = candidate.indexOf('{');
+  const lastBrace = candidate.lastIndexOf('}');
+
+  if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) {
+    throw new Error('Gemini did not return a JSON object.');
+  }
+
+  return JSON.parse(candidate.slice(firstBrace, lastBrace + 1));
+}
+
+function normalizeAnalysis(rawAnalysis, telemetry) {
+  const fallback = buildLocalAnalysis(telemetry);
+  const rawVitals = rawAnalysis?.vitals ?? {};
+  const anomalies = topItems(rawAnalysis?.anomalies, 5).map((item) => ({
+    severity: item?.severity === 'critical' ? 'critical' : 'warning',
+    issue: cleanString(item?.issue, 'Telemetry anomaly detected.'),
+    fix: cleanString(item?.fix, 'Re-log with more validation channels before increasing load.'),
+  }));
+  const roadmap = topItems(rawAnalysis?.roadmap, 5).map((item, index) => ({
+    priority: Number.isFinite(Number(item?.priority)) ? Number(item.priority) : index + 1,
+    part: cleanString(item?.part, fallback.roadmap[index]?.part ?? 'Track validation'),
+    impact: cleanString(item?.impact, fallback.roadmap[index]?.impact ?? 'Improves confidence in the next run.'),
+  }));
+  const trackPrep = topItems(rawAnalysis?.track_prep, 5).map((step, index) =>
+    cleanString(step, fallback.track_prep[index]),
+  );
+
+  return {
+    health_score: clampScore(rawAnalysis?.health_score, fallback.health_score),
+    vitals: {
+      thermal: clampScore(rawVitals.thermal, fallback.vitals.thermal),
+      fueling: clampScore(rawVitals.fueling, fallback.vitals.fueling),
+      ignition: clampScore(rawVitals.ignition, fallback.vitals.ignition),
+    },
+    lead_verdict: cleanString(rawAnalysis?.lead_verdict, fallback.lead_verdict),
+    sensor_peaks: getSensorPeaks(telemetry),
+    anomalies: anomalies.length ? anomalies : fallback.anomalies,
+    roadmap: roadmap.length ? roadmap.sort((a, b) => a.priority - b.priority) : fallback.roadmap,
+    track_prep: trackPrep.length === 5 ? trackPrep : fallback.track_prep,
+    markdown_report: cleanString(rawAnalysis?.markdown_report, fallback.markdown_report),
+  };
 }
 
 function readRawBody(req) {
@@ -136,9 +356,12 @@ async function callGemini(telemetry) {
   const endpoint = getGenerativeLanguageEndpoint();
 
   if (!endpoint) {
+    const analysis = buildLocalAnalysis(telemetry);
+
     return {
       mode: 'local',
-      markdown: buildLocalReport(telemetry),
+      analysis,
+      markdown: analysis.markdown_report,
       warning: 'Google AI Studio server environment variables are not configured, so a local demo report was generated.',
     };
   }
@@ -162,6 +385,11 @@ async function callGemini(telemetry) {
             parts: [{ text: buildGeminiPrompt(telemetry) }],
           },
         ],
+        generationConfig: {
+          temperature: 0.25,
+          maxOutputTokens: 1400,
+          responseMimeType: 'application/json',
+        },
       }),
     });
 
@@ -181,16 +409,22 @@ async function callGemini(telemetry) {
     }
 
     const data = await response.json();
-    const markdown = data.candidates?.[0]?.content?.parts
+    const rawText = data.candidates?.[0]?.content?.parts
       ?.map((part) => part.text)
       .filter(Boolean)
       .join('\n\n');
 
-    if (!markdown) {
+    if (!rawText) {
       throw new Error('Google AI Studio returned an empty response.');
     }
 
-    return { mode: 'google-ai-studio', markdown };
+    const analysis = normalizeAnalysis(extractJson(rawText), telemetry);
+
+    return {
+      mode: 'google-ai-studio',
+      analysis,
+      markdown: analysis.markdown_report,
+    };
   } catch (error) {
     console.error(error);
 
@@ -199,9 +433,12 @@ async function callGemini(telemetry) {
         ? 'Google AI Studio timed out after 25 seconds.'
         : error.message || 'Unknown Google AI Studio error.';
 
+    const analysis = buildLocalAnalysis(telemetry);
+
     return {
       mode: 'fallback',
-      markdown: buildLocalReport(telemetry),
+      analysis,
+      markdown: analysis.markdown_report,
       warning: `Google AI Studio request failed: ${safeErrorMessage}`,
     };
   } finally {

@@ -22,3 +22,5 @@ The app is wired for Google AI Studio through the Vercel Serverless Function at 
 Do not prefix the API key with `VITE_`. The browser posts parsed CSV telemetry to `/api/analyze`, and only the serverless function reads `process.env.VERTEX_API_KEY`.
 
 If the app shows a fallback report, open the Vercel function logs for `/api/analyze`. The UI also returns a sanitized Google AI Studio error message so you can confirm whether the issue is a missing environment variable, invalid API key, disabled API, model access, or a timeout.
+
+The API returns both Markdown and structured JSON analysis. The UI uses the JSON for the health gauge, vitals, anomaly cards, prioritized roadmap, sensor peaks, and track-prep checklist.

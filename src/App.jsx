@@ -13,6 +13,7 @@ function App() {
     status,
     telemetry,
     report,
+    analysis,
     notification,
     analyzeFile,
     loadMockTelemetry,
@@ -111,7 +112,7 @@ function App() {
 
         {hasDashboard ? (
           <Suspense fallback={null}>
-            <Dashboard telemetry={telemetry} report={report} />
+            <Dashboard telemetry={telemetry} report={report} analysis={analysis} />
           </Suspense>
         ) : null}
       </main>

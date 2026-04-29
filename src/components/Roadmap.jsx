@@ -21,10 +21,10 @@ function Roadmap({ items, missingColumns }) {
             <div className="flex items-center justify-between gap-3">
               <p className="text-sm font-black text-white">{item.part}</p>
               <span className="rounded-md border border-blue-300/25 bg-blue-500/10 px-2 py-1 text-xs font-bold text-blue-100">
-                {item.priority}
+                {Number.isFinite(Number(item.priority)) ? `P${item.priority}` : item.priority}
               </span>
             </div>
-            <p className="mt-3 text-sm leading-6 text-slate-400">{item.reason}</p>
+            <p className="mt-3 text-sm leading-6 text-slate-400">{item.impact ?? item.reason}</p>
           </div>
         ))}
 

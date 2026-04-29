@@ -169,6 +169,28 @@ function buildSummary(rows) {
   };
 }
 
+function rangeFor(rows, key, unit) {
+  const values = rows.filter((row) => finite(row[key]));
+  const maxRow = rowWithMax(values, key);
+  const minRow = rowWithMin(values, key);
+
+  return {
+    max: round(maxRow?.[key] ?? 0, key === 'afr' ? 2 : 1),
+    min: round(minRow?.[key] ?? 0, key === 'afr' ? 2 : 1),
+    unit,
+    maxRpm: round(maxRow?.rpm ?? 0, 0),
+    minRpm: round(minRow?.rpm ?? 0, 0),
+  };
+}
+
+function buildSensorPeaks(rows) {
+  return {
+    boost: rangeFor(rows, 'boost', 'psi'),
+    iat: rangeFor(rows, 'iat', 'F'),
+    afr: rangeFor(rows, 'afr', ':1'),
+  };
+}
+
 function buildContextRows(rows) {
   const rowsWithBoost = rows.filter((row) => finite(row.boost));
   const sourceRows = rowsWithBoost.length
@@ -279,6 +301,7 @@ export function parseTelemetryFile(file) {
 
         const summary = buildSummary(rows);
         const sampleRows = buildContextRows(rows);
+        const sensorPeaks = buildSensorPeaks(rows);
 
         resolve({
           fileName: file.name,
@@ -286,6 +309,7 @@ export function parseTelemetryFile(file) {
           rows,
           sampleRows,
           summary,
+          sensorPeaks,
           roadmap: buildRoadmap(summary),
           missingColumns: missingColumns.map((pid) => PID_LABELS[pid]),
           columnMap,

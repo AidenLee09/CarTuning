@@ -1,4 +1,5 @@
 import { motion } from 'framer-motion';
+import AnalysisInsights from './AnalysisInsights.jsx';
 import MechanicsReport from './MechanicsReport.jsx';
 import Roadmap from './Roadmap.jsx';
 import SummaryCard from './SummaryCard.jsx';
@@ -19,7 +20,7 @@ const item = {
   show: { opacity: 1, y: 0, transition: { duration: 0.42, ease: 'easeOut' } },
 };
 
-function Dashboard({ telemetry, report }) {
+function Dashboard({ telemetry, report, analysis }) {
   return (
     <motion.section
       variants={container}
@@ -35,12 +36,19 @@ function Dashboard({ telemetry, report }) {
         <TelemetryChart rows={telemetry.rows} />
       </motion.div>
 
+      <motion.div variants={item} className="lg:col-span-2">
+        <AnalysisInsights analysis={analysis} />
+      </motion.div>
+
       <motion.div variants={item} className="lg:col-span-1">
         <MechanicsReport report={report} />
       </motion.div>
 
       <motion.div variants={item} className="lg:col-span-1">
-        <Roadmap items={telemetry.roadmap} missingColumns={telemetry.missingColumns} />
+        <Roadmap
+          items={analysis?.roadmap ?? telemetry.roadmap}
+          missingColumns={telemetry.missingColumns}
+        />
       </motion.div>
     </motion.section>
   );
