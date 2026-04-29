@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import { parseTelemetryFile } from '../services/csvService.js';
-import { analyzeTelemetryWithGemini } from '../services/apiService.js';
+import { analyzeTelemetry } from '../services/apiService.js';
 
 const wait = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
@@ -33,7 +33,7 @@ export function useTelemetryAnalysis() {
 
     try {
       const [parsed] = await Promise.all([parseTelemetryFile(file), wait(1500)]);
-      const analysis = await analyzeTelemetryWithGemini(parsed);
+      const analysis = await analyzeTelemetry(parsed);
 
       setTelemetry(parsed);
       setReport(analysis.markdown);
