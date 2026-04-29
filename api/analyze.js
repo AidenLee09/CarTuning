@@ -29,6 +29,47 @@ function topItems(items, count) {
   return Array.isArray(items) ? items.slice(0, count) : [];
 }
 
+function clampDelta(value, fallback = 0) {
+  const number = Number(value);
+
+  if (!Number.isFinite(number)) {
+    return fallback;
+  }
+
+  return Math.max(-8, Math.min(18, Math.round(number)));
+}
+
+function buildScoreDelta(item = {}) {
+  const part = `${item.part ?? ''} ${item.priority ?? ''}`.toLowerCase();
+
+  if (part.includes('intercooler') || part.includes('duct') || part.includes('thermal')) {
+    return { health: 7, thermal: 14, fueling: 0, ignition: 3 };
+  }
+
+  if (part.includes('spark') || part.includes('plug') || part.includes('ignition')) {
+    return { health: 5, thermal: 0, fueling: 0, ignition: 12 };
+  }
+
+  if (part.includes('fuel') || part.includes('injector') || part.includes('pump')) {
+    return { health: 6, thermal: 0, fueling: 14, ignition: 1 };
+  }
+
+  if (part.includes('boost') || part.includes('solenoid') || part.includes('clamp') || part.includes('charge')) {
+    return { health: 4, thermal: 2, fueling: 0, ignition: 3 };
+  }
+
+  return { health: 3, thermal: 2, fueling: 2, ignition: 2 };
+}
+
+function normalizeScoreDelta(rawDelta, fallbackDelta) {
+  return {
+    health: clampDelta(rawDelta?.health, fallbackDelta.health),
+    thermal: clampDelta(rawDelta?.thermal, fallbackDelta.thermal),
+    fueling: clampDelta(rawDelta?.fueling, fallbackDelta.fueling),
+    ignition: clampDelta(rawDelta?.ignition, fallbackDelta.ignition),
+  };
+}
+
 function rangeFor(rows, key, unit) {
   const values = rows
     .map((row) => ({
@@ -108,7 +149,17 @@ JSON schema:
     { "severity": "critical" | "warning", "issue": "specific issue", "fix": "specific fix" }
   ],
   "roadmap": [
-    { "priority": 1, "part": "specific part", "impact": "specific impact" }
+    {
+      "priority": 1,
+      "part": "specific part",
+      "impact": "specific impact",
+      "score_delta": {
+        "health": number from -8 to 18,
+        "thermal": number from -8 to 18,
+        "fueling": number from -8 to 18,
+        "ignition": number from -8 to 18
+      }
+    }
   ],
   "track_prep": [
     "step 1",
@@ -125,6 +176,8 @@ Scoring guidance:
 - Penalize thermal score when IAT is high or rises sharply.
 - Penalize fueling score when AFR is lean under boost or excessively rich.
 - Penalize ignition score when timing is low near peak boost.
+- Give each roadmap item a conservative score_delta estimating what would happen if the user applied that fix before the next run.
+- Score deltas should be realistic and modest; do not promise a perfect score.
 - Keep parts and fixes practical for Hyundai N and Corvette platforms.
 `;
 }
@@ -248,6 +301,7 @@ function buildLocalAnalysis(telemetry) {
       priority: index + 1,
       part: item.part,
       impact: item.reason,
+      score_delta: buildScoreDelta(item),
     })),
     track_prep: [
       'Re-log a third-gear pull after full heat soak.',
@@ -288,6 +342,10 @@ function normalizeAnalysis(rawAnalysis, telemetry) {
     priority: Number.isFinite(Number(item?.priority)) ? Number(item.priority) : index + 1,
     part: cleanString(item?.part, fallback.roadmap[index]?.part ?? 'Track validation'),
     impact: cleanString(item?.impact, fallback.roadmap[index]?.impact ?? 'Improves confidence in the next run.'),
+    score_delta: normalizeScoreDelta(
+      item?.score_delta,
+      fallback.roadmap[index]?.score_delta ?? buildScoreDelta(item),
+    ),
   }));
   const trackPrep = topItems(rawAnalysis?.track_prep, 5).map((step, index) =>
     cleanString(step, fallback.track_prep[index]),

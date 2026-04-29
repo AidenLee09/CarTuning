@@ -1,4 +1,6 @@
+import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Fuel, Gauge, ShieldAlert, Thermometer, Zap } from 'lucide-react';
+import WhatIfSimulator from './WhatIfSimulator.jsx';
 
 const statusColor = (score) => {
   if (score >= 82) {
@@ -23,6 +25,10 @@ const peakLabels = {
   iat: 'IAT',
   afr: 'AFR',
 };
+
+const clampScore = (score) => Math.max(0, Math.min(100, Math.round(score ?? 0)));
+
+const itemKey = (item, index) => `${item.priority ?? index}-${item.part}`;
 
 function HealthGauge({ score }) {
   const color = statusColor(score);
@@ -75,14 +81,48 @@ function VitalsMeter({ label, score, icon: Icon }) {
 }
 
 function AnalysisInsights({ analysis }) {
+  const [selectedKeys, setSelectedKeys] = useState([]);
+
+  useEffect(() => {
+    setSelectedKeys([]);
+  }, [analysis]);
+
+  const roadmap = analysis?.roadmap ?? [];
+  const baseScores = {
+    health: clampScore(analysis?.health_score),
+    thermal: clampScore(analysis?.vitals?.thermal),
+    fueling: clampScore(analysis?.vitals?.fueling),
+    ignition: clampScore(analysis?.vitals?.ignition),
+  };
+  const projectedScores = useMemo(() => {
+    const selectedItems = roadmap.filter((item, index) =>
+      selectedKeys.includes(itemKey(item, index)),
+    );
+
+    return selectedItems.reduce(
+      (scores, item) => ({
+        health: clampScore(scores.health + (item.score_delta?.health ?? 0)),
+        thermal: clampScore(scores.thermal + (item.score_delta?.thermal ?? 0)),
+        fueling: clampScore(scores.fueling + (item.score_delta?.fueling ?? 0)),
+        ignition: clampScore(scores.ignition + (item.score_delta?.ignition ?? 0)),
+      }),
+      baseScores,
+    );
+  }, [baseScores, roadmap, selectedKeys]);
+
   if (!analysis) {
     return null;
   }
-
-  const healthScore = Math.max(0, Math.min(100, Math.round(analysis.health_score ?? 0)));
+  const isSimulating = selectedKeys.length > 0;
+  const healthScore = projectedScores.health;
   const anomalies = analysis.anomalies ?? [];
   const trackPrep = analysis.track_prep ?? [];
   const peaks = analysis.sensor_peaks ?? {};
+  const toggleWhatIf = (key) => {
+    setSelectedKeys((current) =>
+      current.includes(key) ? current.filter((item) => item !== key) : [...current, key],
+    );
+  };
 
   return (
     <article className="glass-card p-5 sm:p-6">
@@ -105,7 +145,7 @@ function AnalysisInsights({ analysis }) {
             ) : (
               <ShieldAlert className="h-4 w-4 text-amber-300" aria-hidden="true" />
             )}
-            Track Readiness Score
+            {isSimulating ? 'Simulated Readiness Score' : 'Track Readiness Score'}
           </div>
         </div>
 
@@ -116,7 +156,7 @@ function AnalysisInsights({ analysis }) {
                 key={vital.key}
                 icon={vital.icon}
                 label={vital.label}
-                score={Math.round(analysis.vitals?.[vital.key] ?? 0)}
+                score={projectedScores[vital.key]}
               />
             ))}
           </div>
@@ -185,6 +225,16 @@ function AnalysisInsights({ analysis }) {
           ))}
         </div>
       </div>
+
+      <WhatIfSimulator
+        roadmap={roadmap}
+        selectedKeys={selectedKeys}
+        base={baseScores}
+        projected={projectedScores}
+        getItemKey={itemKey}
+        onReset={() => setSelectedKeys([])}
+        onToggle={toggleWhatIf}
+      />
     </article>
   );
 }

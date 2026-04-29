@@ -51,6 +51,28 @@ function clampScore(value, fallback = 70) {
   return Math.max(0, Math.min(100, Math.round(number)));
 }
 
+function buildScoreDelta(item = {}) {
+  const part = `${item.part ?? ''} ${item.priority ?? ''}`.toLowerCase();
+
+  if (part.includes('intercooler') || part.includes('duct') || part.includes('thermal')) {
+    return { health: 7, thermal: 14, fueling: 0, ignition: 3 };
+  }
+
+  if (part.includes('spark') || part.includes('plug') || part.includes('ignition')) {
+    return { health: 5, thermal: 0, fueling: 0, ignition: 12 };
+  }
+
+  if (part.includes('fuel') || part.includes('injector') || part.includes('pump')) {
+    return { health: 6, thermal: 0, fueling: 14, ignition: 1 };
+  }
+
+  if (part.includes('boost') || part.includes('solenoid') || part.includes('clamp') || part.includes('charge')) {
+    return { health: 4, thermal: 2, fueling: 0, ignition: 3 };
+  }
+
+  return { health: 3, thermal: 2, fueling: 2, ignition: 2 };
+}
+
 function buildLocalAnalysis(telemetry) {
   const { summary, missingColumns, roadmap, sensorPeaks } = telemetry;
   const thermal = clampScore(100 - Math.max(0, summary.peakIat.value - 95) * 1.4, 76);
@@ -80,6 +102,7 @@ function buildLocalAnalysis(telemetry) {
       priority: index + 1,
       part: item.part,
       impact: item.reason,
+      score_delta: buildScoreDelta(item),
     })),
     track_prep: [
       'Re-log a third-gear pull after full heat soak.',
