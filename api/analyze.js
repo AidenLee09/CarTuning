@@ -1,6 +1,6 @@
 const system_instruction = `You are a Senior Race Engineer for Hyundai N and Corvette platforms. Analyze CSV telemetry like a calibration lead: focus on boost control, intake air temperature, ignition timing, AFR stability, repeatability, and parts that should be changed before adding power. Be precise, practical, and avoid generic tuning advice.`;
 
-const GEMINI_MODEL = 'gemini-2.5-flash';
+const GEMINI_MODEL = 'gemini-2.5-flash-lite';
 const GEMINI_TIMEOUT_MS = 25_000;
 
 function getGenerativeLanguageEndpoint() {

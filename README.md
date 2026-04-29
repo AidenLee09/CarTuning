@@ -17,7 +17,7 @@ Use `vercel dev` when you want to test the `/api/analyze` serverless route local
 
 ## Google AI Studio
 
-The app is wired for Google AI Studio through the Vercel Serverless Function at `api/analyze.js`. Add the variable in `.env.example` to Vercel as a server-side environment variable to call Gemini 2.5 Flash through the Generative Language `v1beta` endpoint. Without credentials, Apex Agent generates a local race-engineer demo report so the dashboard remains testable.
+The app is wired for Google AI Studio through the Vercel Serverless Function at `api/analyze.js`. Add the variable in `.env.example` to Vercel as a server-side environment variable to call Gemini 2.5 Flash-Lite through the Generative Language `v1beta` endpoint. Without credentials, Apex Agent generates a local race-engineer demo report so the dashboard remains testable.
 
 Do not prefix the API key with `VITE_`. The browser posts parsed CSV telemetry to `/api/analyze`, and only the serverless function reads `process.env.VERTEX_API_KEY`.
 

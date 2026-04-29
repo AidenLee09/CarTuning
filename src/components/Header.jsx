@@ -18,7 +18,7 @@ function Header() {
         <div className="hidden items-center gap-3 sm:flex">
           <div className="inline-flex h-9 items-center gap-2 rounded-lg border border-blue-400/30 bg-blue-500/10 px-3 text-xs font-semibold text-blue-100">
             <RadioTower className="h-4 w-4" aria-hidden="true" />
-            AI Engine: Gemini 2.5 Flash Active
+            AI Engine: Gemini 2.5 Flash-Lite Active
           </div>
           <div className="grid h-9 w-9 place-items-center rounded-lg border border-white/10 bg-white/[0.04] text-red-300">
             <Activity className="h-4 w-4" aria-hidden="true" />
@@ -32,7 +32,7 @@ function Header() {
       <div className="mx-auto w-full max-w-7xl px-4 pb-3 sm:hidden">
         <div className="inline-flex h-8 w-full items-center justify-center gap-2 rounded-lg border border-blue-400/30 bg-blue-500/10 px-3 text-[11px] font-semibold text-blue-100">
           <RadioTower className="h-3.5 w-3.5" aria-hidden="true" />
-          AI Engine: Gemini 2.5 Flash Active
+          AI Engine: Gemini 2.5 Flash-Lite Active
         </div>
       </div>
     </header>
