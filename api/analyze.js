@@ -1,21 +1,13 @@
 const system_instruction = `You are a Senior Race Engineer for Hyundai N and Corvette platforms. Analyze CSV telemetry like a calibration lead: focus on boost control, intake air temperature, ignition timing, AFR stability, repeatability, and parts that should be changed before adding power. Be precise, practical, and avoid generic tuning advice.`;
 
-const LOCATION = process.env.VERTEX_LOCATION || 'us-central1';
-const MODEL = process.env.VERTEX_MODEL || 'gemini-3-flash';
-const PROJECT_ID = process.env.VERTEX_PROJECT_ID;
-const API_KEY = process.env.VERTEX_API_KEY;
-const CUSTOM_ENDPOINT = process.env.VERTEX_ENDPOINT;
+const VERTEX_TIMEOUT_MS = 25_000;
 
 function getVertexEndpoint() {
-  if (CUSTOM_ENDPOINT) {
-    return CUSTOM_ENDPOINT;
-  }
-
-  if (!PROJECT_ID || !API_KEY) {
+  if (!process.env.VERTEX_PROJECT_ID || !process.env.VERTEX_API_KEY) {
     return null;
   }
 
-  return `https://${LOCATION}-aiplatform.googleapis.com/v1/projects/${PROJECT_ID}/locations/${LOCATION}/publishers/google/models/${MODEL}:generateContent?key=${API_KEY}`;
+  return `https://us-central1-aiplatform.googleapis.com/v1beta1/projects/${process.env.VERTEX_PROJECT_ID}/locations/us-central1/publishers/google/models/gemini-3-flash-preview:generateContent?key=${process.env.VERTEX_API_KEY}`;
 }
 
 function buildPrompt({ fileName, rowCount, summary, sampleRows, missingColumns, roadmap }) {
@@ -144,12 +136,18 @@ async function callGemini(telemetry) {
     };
   }
 
+  let timeoutId;
+
   try {
+    const controller = new AbortController();
+    timeoutId = setTimeout(() => controller.abort(), VERTEX_TIMEOUT_MS);
+
     const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
+      signal: controller.signal,
       body: JSON.stringify({
         systemInstruction: {
           parts: [{ text: system_instruction }],
@@ -169,6 +167,7 @@ async function callGemini(telemetry) {
 
     if (!response.ok) {
       const errorText = await response.text();
+      console.error('Vertex AI error response:', errorText);
       throw new Error(`Vertex AI request failed (${response.status}): ${errorText}`);
     }
 
@@ -190,6 +189,8 @@ async function callGemini(telemetry) {
       markdown: buildLocalReport(telemetry),
       warning: 'Vertex AI was unreachable from the serverless function, so Apex Agent generated a local report.',
     };
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 
